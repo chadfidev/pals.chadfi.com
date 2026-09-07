@@ -33,14 +33,101 @@ const toIsoUtcLabel = () => new Date().toISOString().replace('T', ' ').replace('
 
 const dedupe = (items) => [...new Set(items)];
 
-const sanitizeApiBase = (baseUrl) => {
-  const trimmed = baseUrl.replace(/\/$/, '');
-  const removedEndpoint = trimmed.replace(
-    /\/(info|metrics|players|events|leaderboards|map|server-info|status)$/i,
-    ''
-  );
-  return removedEndpoint;
+const normalizeMetricValue = (payload, keys, fallback = null) => {
+  if (!payload || typeof payload !== 'object') {
+    return fallback;
+  }
+
+  const map = Object.create(null);
+  for (const [k, value] of Object.entries(payload)) {
+    map[String(k).toLowerCase()] = value;
+    map[String(k).replace(/_/g, '').toLowerCase()] = value;
+  }
+
+  for (const key of keys) {
+    const normalized = String(key).toLowerCase();
+    if (map[normalized] !== undefined) {
+      return map[normalized];
+    }
+    const underscored = normalized.replace(/_/g, '');
+    if (map[underscored] !== undefined) {
+      return map[underscored];
+    }
+  }
+
+  return fallback;
 };
+
+const normalizePlayerList = (payload) => {
+  const rawList = Array.isArray(payload?.players) ? payload.players : Array.isArray(payload) ? payload : [];
+
+  return rawList.map((player, index) => {
+    const playerId =
+      player?.steamid ||
+      player?.SteamId ||
+      player?.playerId ||
+      player?.id ||
+      player?.uid ||
+      `${index + 1}`;
+    const name =
+      player?.name ||
+      player?.playerName ||
+      player?.playername ||
+      player?.nickname ||
+      `Player ${index + 1}`;
+    const level = normalizeMetricValue(player, ['level', 'Level', 'characterlevel'], null);
+    const ping = normalizeMetricValue(player, ['ping', 'Ping'], null);
+    const guild = player?.guild || player?.guildName || '';
+    const ip = player?.ip || player?.address || player?.addr || '';
+    const connectedAt = player?.connectedAt || player?.connectTime || player?.lastConnect || '';
+    const steamId = player?.steamid || player?.SteamId || '';
+
+    return {
+      id: String(playerId),
+      name: String(name),
+      steamId: steamId ? String(steamId) : undefined,
+      level: level !== null ? toNumber(level, 0) : undefined,
+      ping: ping !== null ? toNumber(ping, 0) : undefined,
+      guild: guild ? String(guild) : undefined,
+      ip: ip ? String(ip) : undefined,
+      connectedAt: connectedAt ? String(connectedAt) : undefined
+    };
+  });
+};
+
+const normalizeSettings = (payload) => {
+  const valueBag = payload?.settings ?? payload;
+  if (Array.isArray(valueBag)) {
+    return valueBag
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+
+        const key = entry.key || entry.name || entry.param || entry.id;
+        const value = entry.value ?? entry.Value ?? entry.val ?? entry.current;
+        if (!key) {
+          return null;
+        }
+        return {
+          key: String(key),
+          value: value !== undefined ? String(value) : ''
+        };
+      })
+      .filter(Boolean);
+  }
+
+  if (valueBag && typeof valueBag === 'object') {
+    return Object.entries(valueBag).map(([key, value]) => ({
+      key: key,
+      value: value !== undefined ? String(value) : ''
+    }));
+  }
+
+  return [];
+};
+
+const sanitizeApiBase = (baseUrl) => baseUrl.replace(/\/$/, '');
 
 const buildCandidateBases = (baseUrl) => {
   const trimmed = baseUrl.replace(/\/$/, '');
@@ -81,8 +168,7 @@ const requestPalworld = async (path) => {
   const config = getConfig();
   const requestPath = path.startsWith('/') ? path : `/${path}`;
   const baseCandidates = buildCandidateBases(config.baseUrl);
-  const errors = [];
-
+  let lastError = null;
   for (const base of baseCandidates) {
     try {
       const response = await fetch(`${base}${requestPath}`, {
@@ -94,7 +180,10 @@ const requestPalworld = async (path) => {
       });
 
       if (response.status === 404) {
-        errors.push({ base, status: response.status });
+        lastError = createHttpError(
+          response.status,
+          `Palworld API missing ${requestPath} on ${base}`
+        );
         continue;
       }
 
@@ -114,6 +203,10 @@ const requestPalworld = async (path) => {
 
       throw error;
     }
+  }
+
+  if (lastError) {
+    throw lastError;
   }
 
   return null;
@@ -173,71 +266,11 @@ const setCors = (context) => {
   return context;
 };
 
-const buildSyntheticHistory = (value) =>
-  Array.from({ length: 14 }).map((_, idx) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (13 - idx));
-    return {
-      timestamp: date.toLocaleDateString(),
-      players: Math.max(0, value + (idx % 7) - 3)
-    };
-  });
-
-const buildActivityHistory = (base) =>
-  Array.from({ length: 14 }).map((_, idx) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (13 - idx));
-    return {
-      timestamp: date.toLocaleDateString(),
-      logins: Math.max(0, Math.floor(base / 2) + (idx % 4)),
-      logouts: Math.max(0, Math.floor(base / 3)),
-      bossKills: idx % 5 === 0 ? 1 : 0,
-      captures: 20 + ((idx + base) % 40)
-    };
-  });
-
-const mapPlayers = (payload) =>
-  (Array.isArray(payload?.players) ? payload.players : []).map((player, index) => ({
-    id: player.playerId || player.userId || player.accountName || `p-${index + 1}`,
-    name: player.name || player.accountName || `Player ${index + 1}`,
-    characterLevel: toNumber(player.level, 0),
-    guild: player.guild || 'Unassigned',
-    playtimeHours: 0,
-    palsCaptured: 0,
-    richestPlayers: 0
-  }));
-
-const topBy = (players, metric, label = 'guild', top = 5) =>
-  [...players]
-    .sort((a, b) => (toNumber(b[metric], 0) - toNumber(a[metric], 0)))
-    .slice(0, top)
-    .map((player) => ({
-      name: player.name,
-      value: toNumber(player[metric], 0),
-      label: player[label]
-    }));
-
-const largestGuilds = (players) => {
-  const counts = {};
-  for (const player of players) {
-    const guild = player.guild || 'Unassigned';
-    counts[guild] = (counts[guild] || 0) + 1;
-  }
-  return Object.entries(counts)
-    .map(([name, memberCount]) => ({
-      name,
-      value: memberCount,
-      label: `${memberCount} member${memberCount === 1 ? '' : 's'}`
-    }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
-};
-
 const getStatus = async () => {
   const config = getConfig();
   const [info, metrics] = await Promise.all([
     requestPalworldRequired('/info'),
-    requestPalworld('/metrics')
+    requestPalworld('/metrics').catch(() => null)
   ]);
 
   const maxPlayers =
@@ -266,104 +299,58 @@ const getStatus = async () => {
 };
 
 const getPlayers = async () => {
-  const response = await requestPalworld('/players');
-  if (!response) {
-    return [];
-  }
-
-  return mapPlayers(response);
+  const response = await requestPalworldRequired('/players');
+  const players = normalizePlayerList(response);
+  return players;
 };
 
 const getStats = async () => {
-  const metrics = await requestPalworld('/metrics');
-  const currentPlayers = toNumber(metrics?.currentplayernum, 0);
+  const metrics = await requestPalworldRequired('/metrics');
+
+  const frameRate = toNumber(normalizeMetricValue(metrics, ['fps', 'framerate', 'frameRate']), 0);
+  const fps = toNumber(normalizeMetricValue(metrics, ['currentfps', 'serverfps', 'server_fps']), frameRate);
+  const ping = toNumber(normalizeMetricValue(metrics, ['ping', 'avgping', 'averagePing']), 0);
+  const tickRate = toNumber(normalizeMetricValue(metrics, ['tickrate', 'tick_rate']), 0);
+  const currentPlayers = toNumber(
+    normalizeMetricValue(metrics, ['currentplayernum', 'currentplayers', 'playernum', 'players', 'currentPlayerNum']),
+    0
+  );
+  const maxPlayers = toNumber(
+    normalizeMetricValue(metrics, ['maxplayernum', 'maxplayers', 'maxPlayerNum', 'PlayerLimit']),
+    0
+  );
 
   return {
-    totalPlayers: currentPlayers,
-    totalGuilds: 0,
-    totalCaptures: 0,
-    totalBossKills: 0,
-    totalPlayTime: Math.floor(toNumber(metrics?.uptime, 0) / 3600),
-    playerCountHistory: buildSyntheticHistory(currentPlayers),
-    activityHistory: buildActivityHistory(currentPlayers)
-  };
-};
-
-const getEvents = async () => {
-  const events = await requestPalworld('/events');
-  if (Array.isArray(events?.events)) {
-    return events.events.map((event, index) => ({
-      id: event.id || `evt-${Date.now()}-${index}`,
-      timestamp: event.timestamp || toIsoUtcLabel(),
-      type: event.type || 'server-restart',
-      player: event.player,
-      details: event.details || event.message || 'Event from server.'
-    }));
-  }
-
-  const now = toIsoUtcLabel();
-  return [
-    {
-      id: `evt-${Date.now()}`,
-      timestamp: now,
-      type: 'server-restart',
-      details:
-        'Live event feed is not available from this Palworld server version. Showing status placeholder.'
-    }
-  ];
-};
-
-const getLeaderboards = async () => {
-  const raw = await requestPalworld('/players');
-  if (!raw) {
-    return {
-      highestLevel: [],
-      mostPlaytime: [],
-      mostPalsCaptured: [],
-      richestPlayers: [],
-      largestGuilds: []
-    };
-  }
-
-  const players = mapPlayers(raw);
-  return {
-    highestLevel: topBy(players, 'characterLevel'),
-    mostPlaytime: topBy(players, 'playtimeHours'),
-    mostPalsCaptured: topBy(players, 'palsCaptured'),
-    richestPlayers: topBy(players, 'richestPlayers'),
-    largestGuilds: largestGuilds(players)
-  };
-};
-
-const getMapData = async () => {
-  return {
-    features: []
+    uptimeSeconds: toNumber(metrics?.uptime, 0),
+    uptime: formatUptime(metrics?.uptime),
+    frameRate,
+    fps,
+    playersCurrent: currentPlayers,
+    playersMax: maxPlayers,
+    tickRate: tickRate || undefined,
+    ping: ping || undefined,
+    raw: metrics
   };
 };
 
 const getServerInfo = async () => {
-  const info = await requestPalworld('/settings');
-  const fallback = await requestPalworld('/server-info');
-  const source = info || fallback || {};
+  const [info, settings] = await Promise.all([
+    requestPalworldRequired('/info'),
+    requestPalworldRequired('/settings')
+  ]);
+  const normalizedSettings = normalizeSettings(settings).slice(0, 200);
+
   return {
-    rules: [
-      `Server mode: ${source?.bPublicServer ? 'Public' : source?.PublicServer ? 'Public' : 'Unknown'}`,
-      `Player cap: ${toNumber(source?.ServerPlayerMaxNum, 0) || toNumber(source?.maxPlayerNum, 0) || 'not configured'}`,
-      'Actions like kick/ban are disabled in this read-only dashboard.'
+    serverName: info.servername || info.name || 'Chadfi Palworld',
+    description: info.description || 'No server description configured.',
+    version: info.version || 'unknown',
+    worldGuid: info.worldguid || info.worldGuid || undefined,
+    settings: normalizedSettings,
+    infoRows: [
+      `Server info endpoint: ${info.version ? '/v1/api/info' : '/v1/api/info'}`,
+      `Current mode: ${info.bPublicServer ? 'Public' : 'Private / friends-only'}`,
+      `Player max: ${toNumber(info.maxPlayerNum, toNumber(info.MaxPlayerNum, 0)) || 'unknown'}`
     ],
-    mods: ['No additional mods surfaced through this dashboard API.'],
-    restartSchedule: ['No scheduled restart endpoint surfaced by this server version.'],
-    backupSchedule: ['Backups are managed on the server host.'],
-    faq: [
-      {
-        question: 'Is this read-only mode?',
-        answer: 'Yes. This dashboard is read-only until the server exposes write APIs.'
-      },
-      {
-        question: 'Why is uptime rounded to seconds?',
-        answer: 'Current read model uses whatever server fields are exposed; limited routes fall back to placeholder values.'
-      }
-    ]
   };
 };
 
@@ -372,8 +359,5 @@ module.exports = {
   getStatus,
   getPlayers,
   getStats,
-  getEvents,
-  getLeaderboards,
-  getMapData,
   getServerInfo
 };
