@@ -31,6 +31,17 @@ const formatUptime = (secondsValue) => {
 
 const toIsoUtcLabel = () => new Date().toISOString().replace('T', ' ').replace('Z', ' UTC').slice(0, 24);
 
+const dedupe = (items) => [...new Set(items)];
+
+const buildCandidateBases = (baseUrl) => {
+  const trimmed = baseUrl.replace(/\/$/, '');
+  const rootFromBase = trimmed.replace(/\/(v1\/api|api\/v1|api)$/, '');
+
+  const candidates = new Set([trimmed, rootFromBase, `${rootFromBase}/v1/api`, `${rootFromBase}/api/v1`, `${rootFromBase}/api`]);
+
+  return dedupe([...candidates].filter((item) => !!item));
+};
+
 const getConfig = () => {
   const baseUrl = (process.env.PALWORLD_API_BASE ?? '').replace(/\/$/, '');
   if (!baseUrl) {
@@ -58,23 +69,45 @@ const getConfig = () => {
 
 const requestPalworld = async (path) => {
   const config = getConfig();
-  const response = await fetch(`${config.baseUrl}${path}`, {
-    headers: {
-      Authorization:
-        'Basic ' + Buffer.from(`${config.apiUsername}:${config.password}`).toString('base64'),
-      Accept: 'application/json'
-    }
-  });
+  const requestPath = path.startsWith('/') ? path : `/${path}`;
+  const baseCandidates = buildCandidateBases(config.baseUrl);
+  let lastError = null;
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw createHttpError(
-      response.status,
-      `Palworld API failed ${response.status} ${response.statusText}: ${text || 'No response body'}`
-    );
+  for (const base of baseCandidates) {
+    try {
+      const response = await fetch(`${base}${requestPath}`, {
+        headers: {
+          Authorization:
+            'Basic ' + Buffer.from(`${config.apiUsername}:${config.password}`).toString('base64'),
+          Accept: 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        return response.json();
+      }
+
+      const text = await response.text();
+      const error = createHttpError(
+        response.status,
+        `Palworld API failed ${response.status} ${response.statusText}: ${text || 'No response body'}`
+      );
+
+      if (response.status === 404) {
+        lastError = error;
+        continue;
+      }
+
+      throw error;
+    } catch (error) {
+      if (error?.statusCode === 404) {
+        continue;
+      }
+      throw error;
+    }
   }
 
-  return response.json();
+  throw lastError || createHttpError(500, `Palworld API failed for all candidate bases: ${baseCandidates.join(', ')}`);
 };
 
 const setCors = (context) => {
