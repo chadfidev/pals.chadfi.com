@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Rajdhani:wght@500;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #06090f;
+    --foreground: #f8fafc;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: 'Rajdhani', 'Segoe UI', 'Inter', sans-serif;
+    color: var(--foreground);
+    background:
+      radial-gradient(120% 85% at 0% 0%, rgba(72, 199, 255, 0.14), transparent 35%),
+      radial-gradient(120% 80% at 100% 100%, rgba(255, 209, 90, 0.12), transparent 38%),
+      linear-gradient(120deg, #04070d 12%, #060b15 48%, #0b1020 100%);
+    min-height: 100vh;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
