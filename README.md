@@ -46,6 +46,13 @@ npm run preview
 ## Environment variables
 
 - `VITE_API_BASE_URL`: set to your API base URL (for example `https://api.pals.chadfi.com`). Leave blank to call same-origin `/api/*` routes.
+- For Azure Static Web App API proxy mode, set these GitHub Action secrets (used by both workflows):
+  - `PALWORLD_API_BASE` (example `http://palworld.chadfi.com:8212/v1/api`)
+  - `PALWORLD_API_USERNAME` (commonly `admin`)
+  - `PALWORLD_API_PASSWORD` (your server admin password)
+  - `PALWORLD_CONNECT_HOST` (example `palworld.chadfi.com:8211`)
+  - `PALWORLD_CONNECT_PASSWORD` (your desired connect password/help text)
+  - `PALWORLD_GAME_PORT` (usually `8211`)
 
 Live requests are attempted first; if a request fails, the app falls back to bundled mock JSON so the dashboard is still usable.
 
@@ -77,16 +84,18 @@ The following local endpoints are provided at `http://localhost:4000`:
 
 ## Azure Static Web Apps deployment
 
-1. Push this repository to GitHub.
-2. Add the GitHub Secret:
-   - `AZURE_STATIC_WEB_APPS_API_TOKEN`
-3. Connect your repo in the Azure portal and enable Static Web Apps deployment.
-4. Use branch: `main`.
-5. Ensure this workflow file exists:
-   - `.github/workflows/azure-static-web-apps.yml`
-6. Map custom domain in Azure:
-   - Add `pals.chadfi.com`
-   - Create a CNAME record in DNS: `pals` -> `<your-swa-hostname>.azurestaticapps.net`
+1. Push this repository to GitHub (branch `main`).
+2. In GitHub repo settings → Secrets and variables → Actions, set:
+   - `AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MEADOW_00D0D531E` (deployment token from Azure)
+   - `PALWORLD_API_BASE`
+   - `PALWORLD_API_USERNAME`
+   - `PALWORLD_API_PASSWORD`
+   - `PALWORLD_CONNECT_HOST`
+   - `PALWORLD_CONNECT_PASSWORD`
+   - `PALWORLD_GAME_PORT`
+3. Keep only this workflow for deploy in `.github/workflows/azure-static-web-apps-blue-meadow-00d0d531e.yml`.
+4. Set domain `pals.chadfi.com` in Azure Static Web Apps and point DNS:
+   - DNS `CNAME` for `pals` -> `<your-swa-hostname>.azurestaticapps.net`
 
 ## Cloudflare + Azure custom domain setup (for `pals.chadfi.com`)
 
