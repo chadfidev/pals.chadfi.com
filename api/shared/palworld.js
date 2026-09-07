@@ -33,6 +33,15 @@ const toIsoUtcLabel = () => new Date().toISOString().replace('T', ' ').replace('
 
 const dedupe = (items) => [...new Set(items)];
 
+const sanitizeApiBase = (baseUrl) => {
+  const trimmed = baseUrl.replace(/\/$/, '');
+  const removedEndpoint = trimmed.replace(
+    /\/(info|metrics|players|events|leaderboards|map|server-info|status)$/i,
+    ''
+  );
+  return removedEndpoint;
+};
+
 const buildCandidateBases = (baseUrl) => {
   const trimmed = baseUrl.replace(/\/$/, '');
   const rootFromBase = trimmed.replace(/\/(v1\/api|api\/v1|api)$/, '');
@@ -43,7 +52,8 @@ const buildCandidateBases = (baseUrl) => {
 };
 
 const getConfig = () => {
-  const baseUrl = (process.env.PALWORLD_API_BASE ?? '').replace(/\/$/, '');
+  const rawBaseUrl = (process.env.PALWORLD_API_BASE ?? '').replace(/\/$/, '');
+  const baseUrl = sanitizeApiBase(rawBaseUrl);
   if (!baseUrl) {
     throw createHttpError(500, 'PALWORLD_API_BASE is not configured');
   }
@@ -68,6 +78,48 @@ const getConfig = () => {
 };
 
 const requestPalworld = async (path) => {
+  const config = getConfig();
+  const requestPath = path.startsWith('/') ? path : `/${path}`;
+  const baseCandidates = buildCandidateBases(config.baseUrl);
+  const errors = [];
+
+  for (const base of baseCandidates) {
+    try {
+      const response = await fetch(`${base}${requestPath}`, {
+        headers: {
+          Authorization:
+            'Basic ' + Buffer.from(`${config.apiUsername}:${config.password}`).toString('base64'),
+          Accept: 'application/json'
+        }
+      });
+
+      if (response.status === 404) {
+        errors.push({ base, status: response.status });
+        continue;
+      }
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw createHttpError(
+          response.status,
+          `Palworld API failed ${response.status} ${response.statusText}: ${text || 'No response body'}`
+        );
+      }
+
+      return response.json();
+    } catch (error) {
+      if (error?.statusCode === 404) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return null;
+};
+
+const requestPalworldRequired = async (path) => {
   const config = getConfig();
   const requestPath = path.startsWith('/') ? path : `/${path}`;
   const baseCandidates = buildCandidateBases(config.baseUrl);
@@ -183,12 +235,27 @@ const largestGuilds = (players) => {
 
 const getStatus = async () => {
   const config = getConfig();
-  const [info, metrics] = await Promise.all([requestPalworld('/info'), requestPalworld('/metrics')]);
+  const [info, metrics] = await Promise.all([
+    requestPalworldRequired('/info'),
+    requestPalworld('/metrics')
+  ]);
+
+  const maxPlayers =
+    toNumber(metrics?.maxplayernum, 0) ||
+    toNumber(metrics?.maxplayers, 0) ||
+    toNumber(info?.MaxPlayerNum, 0) ||
+    toNumber(info?.maxPlayerNum, 0) ||
+    0;
+  const currentPlayers =
+    toNumber(metrics?.currentplayernum, 0) ||
+    toNumber(metrics?.playernum, 0) ||
+    0;
+
   const status = {
     online: true,
-    currentPlayers: toNumber(metrics.currentplayernum, 0),
-    maxPlayers: toNumber(metrics.maxplayernum, 32),
-    uptime: formatUptime(metrics.uptime),
+    currentPlayers,
+    maxPlayers: maxPlayers || 0,
+    uptime: metrics?.uptime ? formatUptime(metrics.uptime) : 'Unavailable',
     version: info.version || 'unknown',
     serverIp: `${config.connectHost}`,
     connectInstructions: `Join with ${config.connectPassword}`,
@@ -200,38 +267,65 @@ const getStatus = async () => {
 
 const getPlayers = async () => {
   const response = await requestPalworld('/players');
+  if (!response) {
+    return [];
+  }
+
   return mapPlayers(response);
 };
 
 const getStats = async () => {
   const metrics = await requestPalworld('/metrics');
-  const currentPlayers = toNumber(metrics.currentplayernum, 0);
+  const currentPlayers = toNumber(metrics?.currentplayernum, 0);
 
   return {
-    totalPlayers: toNumber(metrics.currentplayernum, 0),
+    totalPlayers: currentPlayers,
     totalGuilds: 0,
     totalCaptures: 0,
     totalBossKills: 0,
-    totalPlayTime: Math.floor(toNumber(metrics.uptime, 0) / 3600),
+    totalPlayTime: Math.floor(toNumber(metrics?.uptime, 0) / 3600),
     playerCountHistory: buildSyntheticHistory(currentPlayers),
     activityHistory: buildActivityHistory(currentPlayers)
   };
 };
 
 const getEvents = async () => {
+  const events = await requestPalworld('/events');
+  if (Array.isArray(events?.events)) {
+    return events.events.map((event, index) => ({
+      id: event.id || `evt-${Date.now()}-${index}`,
+      timestamp: event.timestamp || toIsoUtcLabel(),
+      type: event.type || 'server-restart',
+      player: event.player,
+      details: event.details || event.message || 'Event from server.'
+    }));
+  }
+
   const now = toIsoUtcLabel();
   return [
     {
       id: `evt-${Date.now()}`,
       timestamp: now,
       type: 'server-restart',
-      details: 'Live event feed is not yet exposed by Palworld REST API endpoints.'
+      details:
+        'Live event feed is not available from this Palworld server version. Showing status placeholder.'
     }
   ];
 };
 
 const getLeaderboards = async () => {
-  const players = mapPlayers(await requestPalworld('/players'));
+  const raw = await requestPalworld('/players');
+  if (!raw) {
+    return {
+      highestLevel: [],
+      mostPlaytime: [],
+      mostPalsCaptured: [],
+      richestPlayers: [],
+      largestGuilds: []
+    };
+  }
+
+  const players = mapPlayers(raw);
   return {
     highestLevel: topBy(players, 'characterLevel'),
     mostPlaytime: topBy(players, 'playtimeHours'),
@@ -249,23 +343,25 @@ const getMapData = async () => {
 
 const getServerInfo = async () => {
   const info = await requestPalworld('/settings');
+  const fallback = await requestPalworld('/server-info');
+  const source = info || fallback || {};
   return {
     rules: [
-      `Server mode: ${info.bPublicServer ? 'Public' : 'Private'}`,
-      `Player cap: ${toNumber(info.ServerPlayerMaxNum, 0) || 'not configured'}`,
+      `Server mode: ${source?.bPublicServer ? 'Public' : source?.PublicServer ? 'Public' : 'Unknown'}`,
+      `Player cap: ${toNumber(source?.ServerPlayerMaxNum, 0) || toNumber(source?.maxPlayerNum, 0) || 'not configured'}`,
       'Actions like kick/ban are disabled in this read-only dashboard.'
     ],
     mods: ['No additional mods surfaced through this dashboard API.'],
-    restartSchedule: ['No scheduled restart endpoint configured yet.'],
+    restartSchedule: ['No scheduled restart endpoint surfaced by this server version.'],
     backupSchedule: ['Backups are managed on the server host.'],
     faq: [
       {
         question: 'Is this read-only mode?',
-        answer: 'Yes. Actions are not enabled yet.'
+        answer: 'Yes. This dashboard is read-only until the server exposes write APIs.'
       },
       {
         question: 'Why is uptime rounded to seconds?',
-        answer: 'Current read model uses the server metrics endpoint directly.'
+        answer: 'Current read model uses whatever server fields are exposed; limited routes fall back to placeholder values.'
       }
     ]
   };
