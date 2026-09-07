@@ -15,14 +15,16 @@ module.exports = async function (context) {
     context.res = {
       status: 200,
       headers: context.res.headers,
-      jsonBody: payload
+      body: JSON.stringify(payload),
+      isRaw: true
     };
   } catch (error) {
     const statusCode = error?.statusCode || 500;
     context.res = {
       status: statusCode,
       headers: context.res.headers,
-      jsonBody: { error: error?.message || 'Proxy request failed' }
+      body: JSON.stringify({ error: error?.message || 'Proxy request failed' }),
+      isRaw: true
     };
   }
 };
