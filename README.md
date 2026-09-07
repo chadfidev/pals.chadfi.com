@@ -86,7 +86,7 @@ The following local endpoints are provided at `http://localhost:4000`:
 
 1. Push this repository to GitHub (branch `main`).
 2. In GitHub repo settings → Secrets and variables → Actions, set:
-   - `AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MEADOW_00D0D531E` (deployment token from Azure).
+   - `AZURE_STATIC_WEB_APPS_API_TOKEN` (deployment token from Azure).
 3. In Azure Static Web App → **Configuration** (or **Settings**), add application settings:
    - `PALWORLD_API_BASE` (for example `http://20.98.102.132:8212`)
    - `PALWORLD_API_USERNAME` (`admin`)
