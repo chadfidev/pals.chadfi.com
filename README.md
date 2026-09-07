@@ -86,15 +86,16 @@ The following local endpoints are provided at `http://localhost:4000`:
 
 1. Push this repository to GitHub (branch `main`).
 2. In GitHub repo settings → Secrets and variables → Actions, set:
-   - `AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MEADOW_00D0D531E` (deployment token from Azure)
-   - `PALWORLD_API_BASE`
-   - `PALWORLD_API_USERNAME`
-   - `PALWORLD_API_PASSWORD`
-   - `PALWORLD_CONNECT_HOST`
-   - `PALWORLD_CONNECT_PASSWORD`
-   - `PALWORLD_GAME_PORT`
-3. Keep only this workflow for deploy in `.github/workflows/azure-static-web-apps-blue-meadow-00d0d531e.yml`.
-4. Set domain `pals.chadfi.com` in Azure Static Web Apps and point DNS:
+   - `AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MEADOW_00D0D531E` (deployment token from Azure).
+3. In Azure Static Web App → **Configuration** (or **Settings**), add application settings:
+   - `PALWORLD_API_BASE` (for example `http://20.98.102.132:8212`)
+   - `PALWORLD_API_USERNAME` (`admin`)
+   - `PALWORLD_API_PASSWORD` (Palword server admin password)
+   - `PALWORLD_CONNECT_HOST` (`palworld.chadfi.com`)
+   - `PALWORLD_CONNECT_PASSWORD` (`kefka`)
+   - `PALWORLD_GAME_PORT` (`8211`)
+4. Keep only this workflow for deploy: `.github/workflows/azure-static-web-apps-blue-meadow-00d0d531e.yml`.
+5. Set domain `pals.chadfi.com` in Azure Static Web Apps and point DNS:
    - DNS `CNAME` for `pals` -> `<your-swa-hostname>.azurestaticapps.net`
 
 ## Cloudflare + Azure custom domain setup (for `pals.chadfi.com`)
