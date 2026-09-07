@@ -14,6 +14,8 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
+    env:
+      AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +27,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Validate deployment token is present
+        run: |
+          if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN}" ]; then
+            echo "::error ::AZURE_STATIC_WEB_APPS_API_TOKEN is empty. Add it in GitHub repo Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          CLEAN_TOKEN=$(printf '%s' "${AZURE_STATIC_WEB_APPS_API_TOKEN}" | tr -d '\r\n')
+          echo "Token length: ${#CLEAN_TOKEN}"
+          if [ "${CLEAN_TOKEN}" != "${AZURE_STATIC_WEB_APPS_API_TOKEN}" ]; then
+            echo "::warning ::Token includes a newline/line-ending character. This can cause deploy rejection."
+          fi
       - name: Install dependencies
         run: npm ci
       - name: Build
@@ -33,7 +46,7 @@ jobs:
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ env.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
