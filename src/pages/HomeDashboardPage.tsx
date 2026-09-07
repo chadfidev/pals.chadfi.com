@@ -26,14 +26,9 @@ const FlyerPanel = () => {
   return (
     <GlassPanel className="overflow-hidden">
       <h3 className="text-lg font-semibold text-neonBlue">Palworld Flyer</h3>
-      <p className="mb-3 mt-2 text-xs uppercase tracking-[0.16em] text-slate-300">
-        Place your PNG in <span className="text-neonGold">public/palworld-flyer.png</span>
-      </p>
       <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-2">
         {missing ? (
-          <p className="text-sm text-slate-300">
-            Flyer not found. Add the file at <span className="text-neonGold">public/palworld-flyer.png</span>.
-          </p>
+          <p className="text-sm text-slate-300">Flyer not found.</p>
         ) : (
           <img
             src="/palworld-flyer.png"
@@ -106,7 +101,7 @@ export function HomeDashboardPage() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="order-2 grid gap-4 lg:grid-cols-2 xl:order-1">
               <GlassPanel>
                 <h3 className="text-lg font-semibold text-neonBlue">Server Identity</h3>
                 <div className="mt-3 space-y-2 text-sm text-slate-200">
@@ -132,7 +127,9 @@ export function HomeDashboardPage() {
               </GlassPanel>
             </div>
 
-            <FlyerPanel />
+            <div className="order-1 xl:order-2">
+              <FlyerPanel />
+            </div>
           </section>
 
           <section className="grid gap-4">
