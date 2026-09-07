@@ -12,9 +12,22 @@ class HttpDashboardApi implements DashboardApi {
   private async get<T>(path: string): Promise<T> {
     const response = await fetch(`${API_BASE_URL}${path}`);
     if (!response.ok) {
-      throw new Error(`Request to ${path} failed: ${response.status}`);
+      const message = await response.text().catch(() => '');
+      throw new Error(
+        `Request to ${path} failed: ${response.status} ${response.statusText}. ${message || 'No response body.'}`.trim()
+      );
     }
-    return response.json() as Promise<T>;
+
+    const text = await response.text();
+    if (!text || !text.trim()) {
+      throw new Error(`Request to ${path} returned an empty response body.`);
+    }
+
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Request to ${path} returned non-JSON content.`);
+    }
   }
 
   getStatus(): Promise<ServerStatus> {

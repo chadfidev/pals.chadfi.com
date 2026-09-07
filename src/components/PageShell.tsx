@@ -13,11 +13,10 @@ export function PageShell({ children }: PageShellProps) {
             <div>
               <p className="text-xs uppercase tracking-[0.24em] text-neonGold">Palworld Community Ops</p>
               <h1 className="mt-2 text-3xl font-black tracking-[0.03em] text-neonBlue md:text-4xl">
-                pals.chadfi.com Dashboard
+                Chadfi Palworld Server Info
               </h1>
             </div>
           </div>
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-200">Single page live server overview</p>
         </header>
         <main className="pb-8">{children}</main>
       </div>

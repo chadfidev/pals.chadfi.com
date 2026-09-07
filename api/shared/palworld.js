@@ -6,6 +6,22 @@ const createHttpError = (status, message) => {
   return error;
 };
 
+const parseJsonResponse = async (response, requestPath) => {
+  const text = await response.text();
+  if (!text || !text.trim()) {
+    throw createHttpError(response.status || 500, `Empty response body from ${requestPath}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw createHttpError(
+      response.status || 500,
+      `Non-JSON response from ${requestPath}: ${text.slice(0, 160)}`
+    );
+  }
+};
+
 const toNumber = (value, fallback = 0) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -195,7 +211,7 @@ const requestPalworld = async (path) => {
         );
       }
 
-      return response.json();
+      return parseJsonResponse(response, requestPath);
     } catch (error) {
       if (error?.statusCode === 404) {
         continue;
@@ -229,7 +245,7 @@ const requestPalworldRequired = async (path) => {
       });
 
       if (response.ok) {
-        return response.json();
+      return parseJsonResponse(response, requestPath);
       }
 
       const text = await response.text();
